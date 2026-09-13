@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import { getCheckoutProduct, startCheckout } from "@/lib/checkout.functions";
 import { captureAttribution, type Attribution } from "@/lib/attribution";
 import { initPixel, newEventId, trackPixel } from "@/lib/pixel";
-import { formatMoney, SUPPORTED_CURRENCIES, type Currency } from "@/lib/money";
+import { formatMoney, fromMinorAmount, type Currency } from "@/lib/money";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -66,7 +66,7 @@ function CheckoutPage() {
 
   const [currency, setCurrency] = useState<Currency>(product.currency);
   const [attribution, setAttribution] = useState<Attribution>({});
-  const [form, setForm] = useState({ name: "", email: "", phone: "" });
+  const [form, setForm] = useState({ name: "", email: "" });
   const [touched, setTouched] = useState({ name: false, email: false });
   const addedToCart = useRef(false);
   const eventId = useMemo(() => newEventId(), []);
@@ -79,7 +79,7 @@ function CheckoutPage() {
       content_name: product.name,
       content_ids: [product.id],
       content_type: "product",
-      value: priceMinor / 100,
+      value: fromMinorAmount(priceMinor, currency),
       currency,
     });
   };
@@ -91,7 +91,7 @@ function CheckoutPage() {
       content_name: product.name,
       content_ids: [product.id],
       content_type: "product",
-      value: product.priceMinor / 100,
+      value: fromMinorAmount(product.priceMinor, product.currency),
       currency: product.currency,
     });
   }, [product.metaPixelId, product.id, product.name, product.priceMinor, product.currency]);
@@ -113,7 +113,7 @@ function CheckoutPage() {
       const fresh = captureAttribution();
       trackPixel("InitiateCheckout", {
         content_name: product.name,
-        value: priceMinor / 100,
+        value: fromMinorAmount(priceMinor, currency),
         currency,
       });
       return start({
@@ -122,7 +122,6 @@ function CheckoutPage() {
           currency,
           email: form.email.trim(),
           name: form.name.trim(),
-          phone: form.phone.trim() || undefined,
           eventId,
           attribution: Object.fromEntries(
             Object.entries(fresh).filter(([, v]) => typeof v === "string"),
@@ -164,7 +163,7 @@ function CheckoutPage() {
                 onChange={(event) => void changeCurrency(event.target.value as Currency)}
                 className="h-9 appearance-none rounded-full bg-secondary pr-8 pl-3.5 text-xs font-semibold focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
               >
-                {SUPPORTED_CURRENCIES.map((code) => (
+                {product.availableCurrencies.map((code) => (
                   <option key={code} value={code}>
                     {code}
                   </option>
@@ -266,22 +265,6 @@ function CheckoutPage() {
                     We send your download link to this address.
                   </p>
                 )}
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="phone" className="text-sm">
-                  Phone <span className="text-muted-foreground">(optional)</span>
-                </Label>
-                <Input
-                  id="phone"
-                  type="tel"
-                  inputMode="tel"
-                  value={form.phone}
-                  onFocus={trackAddToCart}
-                  onChange={(event) => setForm({ ...form, phone: event.target.value })}
-                  placeholder="+234 800 000 0000"
-                  autoComplete="tel"
-                  className={fieldClass}
-                />
               </div>
             </form>
 

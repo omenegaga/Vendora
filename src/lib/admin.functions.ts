@@ -21,18 +21,17 @@ export const getIntegrationStatus = createServerFn({ method: "GET" })
     });
     if (!isAdmin) throw new Error("Forbidden");
 
-    const present = (name: string) => {
-      const value = process.env[name];
-      return !!value && value.trim().length > 0;
-    };
-
-    const { hasMetaCapiToken } = await import("./meta-credentials.server");
+    const [{ hasMetaCapiToken }, { paystackKey, flutterwaveKey }] = await Promise.all([
+      import("./meta-credentials.server"),
+      import("./gateways.server"),
+    ]);
     return {
-      paystack: present("PAYSTACK_SECRET_KEY"),
-      flutterwave: present("FLUTTERWAVE_SECRET_KEY"),
-      flutterwaveWebhookHash: present("FLUTTERWAVE_SECRET_HASH"),
+      // Status shares the exact credential resolution used to start payments.
+      paystack: !!paystackKey(),
+      flutterwave: !!flutterwaveKey(),
+      flutterwaveWebhookHash: !!process.env["FLUTTERWAVE_SECRET_HASH"]?.trim(),
       metaCapiToken: await hasMetaCapiToken(),
-      emailSending: present("RESEND_API_KEY") && present("EMAIL_FROM_ADDRESS"),
+      emailSending: !!process.env["RESEND_API_KEY"]?.trim() && !!process.env["EMAIL_FROM_ADDRESS"]?.trim(),
     };
   });
 

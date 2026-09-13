@@ -5,7 +5,14 @@ import { ArrowLeft, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
-import { SUPPORTED_CURRENCIES, CURRENCY_LABELS, formatMoney } from "@/lib/money";
+import {
+  SUPPORTED_CURRENCIES,
+  CURRENCY_LABELS,
+  currencyFractionDigits,
+  formatMoney,
+  fromMinorAmount,
+  toMinorAmount,
+} from "@/lib/money";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -29,6 +36,24 @@ type Draft = {
   file_path: string | null;
   is_active: boolean;
 };
+
+/** Keep uploads compact before they enter Storage; 1600px preserves crisp checkout artwork. */
+async function optimizeCoverImage(file: File): Promise<File> {
+  const source = await createImageBitmap(file);
+  const maxEdge = 1600;
+  const scale = Math.min(1, maxEdge / Math.max(source.width, source.height));
+  const width = Math.max(1, Math.round(source.width * scale));
+  const height = Math.max(1, Math.round(source.height * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  canvas.getContext("2d")?.drawImage(source, 0, 0, width, height);
+  source.close();
+  const blob = await new Promise<Blob>((resolve, reject) =>
+    canvas.toBlob((result) => (result ? resolve(result) : reject(new Error("Could not optimize image"))), "image/webp", 0.88),
+  );
+  return new File([blob], `${file.name.replace(/\.[^.]+$/, "")}.webp`, { type: "image/webp" });
+}
 
 function ProductEditor() {
   const { id } = Route.useParams();
@@ -62,7 +87,7 @@ function ProductEditor() {
       description: data.description ?? "",
       cover_image_url: data.cover_image_url ?? "",
       base_currency: data.base_currency,
-      base_price: (Number(data.base_price_minor) / 100).toString(),
+      base_price: fromMinorAmount(Number(data.base_price_minor), data.base_currency).toString(),
       file_url: data.file_url ?? "",
       file_name: data.file_name ?? "",
       file_path: data.file_path,
@@ -70,7 +95,7 @@ function ProductEditor() {
     });
     const next: Record<string, string> = {};
     for (const row of data.product_prices ?? []) {
-      next[row.currency] = (Number(row.price_minor) / 100).toString();
+      next[row.currency] = fromMinorAmount(Number(row.price_minor), row.currency).toString();
     }
     setPrices(next);
   }, [product.data]);
@@ -87,7 +112,7 @@ function ProductEditor() {
           description: draft.description.trim() || null,
           cover_image_url: draft.cover_image_url.trim() || null,
           base_currency: draft.base_currency,
-          base_price_minor: Math.round(Number(draft.base_price || 0) * 100),
+          base_price_minor: toMinorAmount(Number(draft.base_price || 0), draft.base_currency),
           file_url: draft.file_url.trim() || null,
           file_name: draft.file_name.trim() || null,
           file_path: draft.file_path,
@@ -98,7 +123,7 @@ function ProductEditor() {
 
       for (const currency of SUPPORTED_CURRENCIES) {
         const raw = prices[currency];
-        const value = raw ? Math.round(Number(raw) * 100) : 0;
+        const value = raw ? toMinorAmount(Number(raw), currency) : 0;
         if (!raw || value <= 0) {
           await supabase.from("product_prices").delete().eq("product_id", id).eq("currency", currency);
         } else {
@@ -155,16 +180,17 @@ function ProductEditor() {
     }
     setUploadingCover(true);
     try {
-      const path = `${id}/${Date.now()}-${file.name.replace(/[^\w.-]+/g, "_")}`;
-      const { error } = await supabase.storage.from("product-images").upload(path, file, {
+      const optimized = await optimizeCoverImage(file);
+      const path = `${id}/${Date.now()}-${file.name.replace(/\.[^.]+$/, "").replace(/[^\w.-]+/g, "_")}.webp`;
+      const { error } = await supabase.storage.from("product-images").upload(path, optimized, {
         upsert: true,
-        contentType: file.type,
+        contentType: "image/webp",
       });
       if (error) throw error;
       setDraft((current) =>
         current ? { ...current, cover_image_url: `/api/public/product-image/${path}` } : current,
       );
-      toast.success("Cover image uploaded. Remember to save.");
+      toast.success("Optimized cover image uploaded. Remember to save.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Upload failed");
     } finally {
@@ -276,7 +302,7 @@ function ProductEditor() {
               id="base-price"
               type="number"
               min="0"
-              step="0.01"
+              step={String(1 / 10 ** currencyFractionDigits(draft.base_currency))}
               value={draft.base_price}
               onChange={(e) => setDraft({ ...draft, base_price: e.target.value })}
             />
@@ -312,14 +338,14 @@ function ProductEditor() {
                 id={`price-${currency}`}
                 type="number"
                 min="0"
-                step="0.01"
+                step={String(1 / 10 ** currencyFractionDigits(currency))}
                 placeholder="auto"
                 value={prices[currency] ?? ""}
                 onChange={(e) => setPrices({ ...prices, [currency]: e.target.value })}
               />
               {prices[currency] ? (
                 <p className="tabular text-xs text-muted-foreground">
-                  {formatMoney(Math.round(Number(prices[currency]) * 100), currency)}
+                  {formatMoney(toMinorAmount(Number(prices[currency]), currency), currency)}
                 </p>
               ) : null}
             </div>

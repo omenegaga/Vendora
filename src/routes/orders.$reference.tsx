@@ -6,6 +6,7 @@ import { CheckCircle2, Clock, Download, Loader2, Mail, RefreshCw } from "lucide-
 import { toast } from "sonner";
 
 import { confirmTestOrder, resendAccessEmail, verifyOrder } from "@/lib/checkout.functions";
+import { fromMinorAmount } from "@/lib/money";
 import { formatMoney } from "@/lib/money";
 import { initPixel, trackPixel } from "@/lib/pixel";
 import { Button } from "@/components/ui/button";
@@ -45,7 +46,7 @@ function OrderPage() {
     trackPixel(
       "Purchase",
       {
-        value: data.amountMinor / 100,
+        value: fromMinorAmount(data.amountMinor, data.currency),
         currency: data.currency,
         content_name: data.productName ?? undefined,
       },

@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { ArrowRight, Download, Globe } from "lucide-react";
 
 import { listStoreProducts } from "@/lib/checkout.functions";
+import { fromMinorAmount } from "@/lib/money";
 import { formatMoney } from "@/lib/money";
 import { captureAttribution } from "@/lib/attribution";
 import { initPixel, newEventId, trackPixel } from "@/lib/pixel";
@@ -106,7 +107,7 @@ function StoreFront() {
                       content_name: product.name,
                       content_ids: [product.id],
                       content_type: "product",
-                      value: product.priceMinor / 100,
+                      value: fromMinorAmount(product.priceMinor, product.currency),
                       currency: product.currency,
                     }, newEventId())
                   }

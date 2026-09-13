@@ -6,6 +6,7 @@ import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
 import { formatMoney } from "@/lib/money";
+import { toMinorAmount } from "@/lib/money";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -58,7 +59,7 @@ function ProductsPage() {
           name: name.trim(),
           slug: `${slugify(name)}-${Math.random().toString(36).slice(2, 6)}`,
           base_currency: "USD",
-          base_price_minor: Math.round(Number(price) * 100),
+          base_price_minor: toMinorAmount(Number(price), "USD"),
           is_active: false,
         })
         .select("id")

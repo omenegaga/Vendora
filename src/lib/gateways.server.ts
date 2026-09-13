@@ -1,4 +1,5 @@
 /** Server-only Paystack + Flutterwave clients. */
+import { fromMinorAmount, toMinorAmount } from "./money";
 
 export type GatewayName = "paystack" | "flutterwave";
 
@@ -32,7 +33,16 @@ export function anyGatewayConfigured(): boolean {
   return !!paystackKey() || !!flutterwaveKey();
 }
 
-/** Paystack charges in minor units and supports NGN, GHS, KES, USD, ZAR. */
+const PAYSTACK_CURRENCIES = new Set(["NGN", "GHS", "KES", "USD", "ZAR", "XOF"]);
+const FLUTTERWAVE_CURRENCIES = new Set([
+  "NGN", "GHS", "KES", "USD", "ZAR", "XOF", "XAF", "UGX", "TZS", "RWF", "ZMW", "MWK", "EUR", "GBP",
+]);
+
+export function gatewaySupportsCurrency(gateway: GatewayName, currency: string): boolean {
+  return (gateway === "paystack" ? PAYSTACK_CURRENCIES : FLUTTERWAVE_CURRENCIES).has(currency);
+}
+
+/** Paystack charges in minor units; its documented XOF API amount is a 100× exception. */
 export async function initPaystack(args: {
   email: string;
   amountMinor: number;
@@ -49,7 +59,7 @@ export async function initPaystack(args: {
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
     body: JSON.stringify({
       email: args.email,
-      amount: args.amountMinor,
+      amount: args.currency === "XOF" ? args.amountMinor * 100 : args.amountMinor,
       currency: args.currency,
       reference: args.reference,
       callback_url: args.callbackUrl,
@@ -89,7 +99,7 @@ export async function verifyPaystack(reference: string): Promise<VerifyResult> {
     reference: data?.reference,
     paymentStatus: data?.status,
     currency: data?.currency,
-    amountMinor: typeof data?.amount === "number" ? data.amount : undefined,
+    amountMinor: typeof data?.amount === "number" ? (data.currency === "XOF" ? data.amount / 100 : data.amount) : undefined,
     gatewayReference: data?.reference ?? reference,
     raw: payload,
   };
@@ -99,7 +109,6 @@ export async function verifyPaystack(reference: string): Promise<VerifyResult> {
 export async function initFlutterwave(args: {
   email: string;
   name?: string | null;
-  phone?: string | null;
   amountMinor: number;
   currency: string;
   reference: string;
@@ -115,10 +124,10 @@ export async function initFlutterwave(args: {
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
     body: JSON.stringify({
       tx_ref: args.reference,
-      amount: (args.amountMinor / 100).toFixed(2),
+      amount: fromMinorAmount(args.amountMinor, args.currency).toFixed(2),
       currency: args.currency,
       redirect_url: args.callbackUrl,
-      customer: { email: args.email, name: args.name ?? undefined, phonenumber: args.phone ?? undefined },
+      customer: { email: args.email, name: args.name ?? undefined },
       customizations: { title: args.title },
       meta: args.metadata,
     }),
@@ -153,7 +162,7 @@ export async function verifyFlutterwave(reference: string): Promise<VerifyResult
     reference: data?.tx_ref,
     paymentStatus: data?.status,
     currency: data?.currency,
-    amountMinor: typeof data?.amount === "number" ? Math.round(data.amount * 100) : undefined,
+    amountMinor: typeof data?.amount === "number" ? toMinorAmount(data.amount, data.currency ?? "USD") : undefined,
     gatewayReference: data?.id ? String(data.id) : reference,
     raw: payload,
   };
@@ -193,5 +202,5 @@ export function routeGateways(
   );
   const all: GatewayName[] = ["paystack", "flutterwave"];
   const ordered = [...preferred, ...all.filter((g) => !preferred.includes(g))];
-  return ordered.filter((g) => isGatewayConfigured(g));
+  return ordered.filter((g) => isGatewayConfigured(g) && gatewaySupportsCurrency(g, currency));
 }

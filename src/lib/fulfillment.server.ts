@@ -4,6 +4,7 @@ import { randomBytes } from "crypto";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { sendAccessEmail } from "./email.server";
 import { sendPurchaseToCapi } from "./meta.server";
+import { fromMinorAmount } from "./money";
 
 export type StoreSettings = {
   store_name: string;
@@ -80,7 +81,7 @@ export async function retryMetaCapiPurchase(args: {
     phone: order.phone,
     name: order.name,
     country: order.country,
-    value: order.amount_minor / 100,
+    value: fromMinorAmount(Number(order.amount_minor), order.currency),
     currency: order.currency,
     contentName: order.products?.name ?? "Your purchase",
     contentId: order.product_id,

@@ -77,13 +77,14 @@ export const getCheckoutProduct = createServerFn({ method: "GET" })
     if (isLocalPreviewWithoutDatabase()) {
       if (data.slug !== DEMO_PRODUCT.slug) return null;
       const currency = isCurrency(data.currency) ? data.currency : DEMO_PRODUCT.currency;
-      const priceMinorByCurrency: Record<Currency, number> = {
+      const priceMinorByCurrency: Partial<Record<Currency, number>> = {
         USD: 1900,
         NGN: 2_500_000,
         GHS: 25_000,
         KES: 250_000,
       };
-      return { ...DEMO_PRODUCT, currency, priceMinor: priceMinorByCurrency[currency] };
+      const selected = priceMinorByCurrency[currency] ? currency : DEMO_PRODUCT.currency;
+      return { ...DEMO_PRODUCT, currency: selected, priceMinor: priceMinorByCurrency[selected]!, availableCurrencies: Object.keys(priceMinorByCurrency) as Currency[] };
     }
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { loadSettings } = await import("./fulfillment.server");
@@ -101,20 +102,17 @@ export const getCheckoutProduct = createServerFn({ method: "GET" })
     const storeDefault = isCurrency(settings.default_currency)
       ? settings.default_currency
       : DEFAULT_CURRENCY;
-    const currency = isCurrency(data.currency)
-      ? data.currency
-      : currencyForCountry(country, storeDefault);
-
     const overrides: Record<string, number> = {};
     for (const row of product.product_prices ?? []) overrides[row.currency] = Number(row.price_minor);
-
-    const { priceMinor } = resolvePriceMinor({
-      currency,
-      basePriceMinor: Number(product.base_price_minor),
-      baseCurrency: product.base_currency,
-      overrides,
-      fxRates: settings.fx_rates,
+    const priced = SUPPORTED_CURRENCIES.flatMap((currency) => {
+      const resolved = resolvePriceMinor({ currency, basePriceMinor: Number(product.base_price_minor), baseCurrency: product.base_currency, overrides, fxRates: settings.fx_rates });
+      return resolved ? [{ currency, priceMinor: resolved.priceMinor }] : [];
     });
+    if (!priced.length) return null;
+    const requested = isCurrency(data.currency) ? data.currency : currencyForCountry(country, storeDefault);
+    const chosen = priced.find(({ currency }) => currency === requested)
+      ?? priced.find(({ currency }) => currency === storeDefault)
+      ?? priced[0];
 
     return {
       id: product.id,
@@ -123,10 +121,10 @@ export const getCheckoutProduct = createServerFn({ method: "GET" })
       tagline: product.tagline,
       description: product.description,
       coverImageUrl: product.cover_image_url,
-      currency,
-      priceMinor,
+      currency: chosen.currency,
+      priceMinor: chosen.priceMinor,
       country,
-      availableCurrencies: ["NGN", "GHS", "KES", "USD"],
+      availableCurrencies: priced.map(({ currency }) => currency),
       storeName: settings.store_name,
       metaPixelId: settings.meta_pixel_id,
     };
@@ -179,23 +177,24 @@ export const listStoreProducts = createServerFn({ method: "GET" }).handler(async
     products: (products ?? []).map((product) => {
       const overrides: Record<string, number> = {};
       for (const row of product.product_prices ?? []) overrides[row.currency] = Number(row.price_minor);
-      const { priceMinor } = resolvePriceMinor({
-        currency,
-        basePriceMinor: Number(product.base_price_minor),
-        baseCurrency: product.base_currency,
-        overrides,
-        fxRates: settings.fx_rates,
+      const available = SUPPORTED_CURRENCIES.flatMap((candidate) => {
+        const resolved = resolvePriceMinor({ currency: candidate, basePriceMinor: Number(product.base_price_minor), baseCurrency: product.base_currency, overrides, fxRates: settings.fx_rates });
+        return resolved ? [{ currency: candidate, priceMinor: resolved.priceMinor }] : [];
       });
+      const chosen = available.find(({ currency: candidate }) => candidate === currency)
+        ?? available.find(({ currency: candidate }) => candidate === settings.default_currency)
+        ?? available[0];
+      if (!chosen) return null;
       return {
         id: product.id,
         slug: product.slug,
         name: product.name,
         tagline: product.tagline,
         coverImageUrl: product.cover_image_url,
-        currency,
-        priceMinor,
+        currency: chosen.currency,
+        priceMinor: chosen.priceMinor,
       };
-    }),
+    }).filter((product): product is NonNullable<typeof product> => product !== null),
   };
 });
 
@@ -204,7 +203,6 @@ const startCheckoutSchema = z.object({
   currency: z.string().min(3).max(3),
   email: z.string().email().max(200),
   name: z.string().min(1).max(120),
-  phone: z.string().max(40).optional(),
   eventId: z.string().min(1).max(80),
   attribution: attributionSchema,
 });
@@ -239,14 +237,15 @@ export const startCheckout = createServerFn({ method: "POST" })
     const settings = await loadSettings();
     const overrides: Record<string, number> = {};
     for (const row of product.product_prices ?? []) overrides[row.currency] = Number(row.price_minor);
-    const { priceMinor } = resolvePriceMinor({
+    const resolvedPrice = resolvePriceMinor({
       currency: data.currency,
       basePriceMinor: Number(product.base_price_minor),
       baseCurrency: product.base_currency,
       overrides,
       fxRates: settings.fx_rates,
     });
-    if (priceMinor <= 0) throw new Error("This product has no price for your currency yet");
+    if (!resolvedPrice || resolvedPrice.priceMinor <= 0) throw new Error("This product has no configured price for that currency");
+    const priceMinor = resolvedPrice.priceMinor;
 
     const origin = requestOrigin();
     const country = detectCountry();
@@ -257,7 +256,7 @@ export const startCheckout = createServerFn({ method: "POST" })
       product_id: product.id,
       email: data.email,
       name: data.name,
-      phone: data.phone ?? null,
+      phone: null,
       country,
       currency: data.currency,
       amount_minor: priceMinor,
@@ -287,7 +286,6 @@ export const startCheckout = createServerFn({ method: "POST" })
             : await gateways.initFlutterwave({
                 email: data.email,
                 name: data.name,
-                phone: data.phone ?? null,
                 amountMinor: priceMinor,
                 currency: data.currency,
                 reference,

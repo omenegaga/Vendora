@@ -1,4 +1,6 @@
-export const SUPPORTED_CURRENCIES = ["NGN", "GHS", "KES", "USD"] as const;
+export const SUPPORTED_CURRENCIES = [
+  "NGN", "GHS", "KES", "USD", "ZAR", "XOF", "XAF", "UGX", "TZS", "RWF", "ZMW", "MWK", "EUR", "GBP",
+] as const;
 export type Currency = (typeof SUPPORTED_CURRENCIES)[number];
 
 export const CURRENCY_LABELS: Record<Currency, string> = {
@@ -6,13 +8,55 @@ export const CURRENCY_LABELS: Record<Currency, string> = {
   GHS: "Ghanaian Cedi",
   KES: "Kenyan Shilling",
   USD: "US Dollar",
+  ZAR: "South African Rand",
+  XOF: "West African CFA Franc",
+  XAF: "Central African CFA Franc",
+  UGX: "Ugandan Shilling",
+  TZS: "Tanzanian Shilling",
+  RWF: "Rwandan Franc",
+  ZMW: "Zambian Kwacha",
+  MWK: "Malawian Kwacha",
+  EUR: "Euro",
+  GBP: "British Pound",
 };
+
+/** ISO-4217 currency exponents. Stored prices always use the currency's minor unit. */
+const FRACTION_DIGITS: Partial<Record<Currency, number>> = { XOF: 0, XAF: 0, UGX: 0, TZS: 0, RWF: 0 };
+
+export function currencyFractionDigits(currency: string): number {
+  return FRACTION_DIGITS[currency as Currency] ?? 2;
+}
+
+export function minorUnitFactor(currency: string): number {
+  return 10 ** currencyFractionDigits(currency);
+}
+
+export function fromMinorAmount(minor: number, currency: string): number {
+  return minor / minorUnitFactor(currency);
+}
+
+export function toMinorAmount(amount: number, currency: string): number {
+  return Math.round(amount * minorUnitFactor(currency));
+}
 
 /** Country (ISO-3166 alpha-2) to the currency we charge in. */
 export const COUNTRY_CURRENCY: Record<string, Currency> = {
   NG: "NGN",
   GH: "GHS",
   KE: "KES",
+  ZA: "ZAR",
+  CI: "XOF",
+  SN: "XOF",
+  CM: "XAF",
+  UG: "UGX",
+  TZ: "TZS",
+  RW: "RWF",
+  ZM: "ZMW",
+  MW: "MWK",
+  GB: "GBP",
+  AT: "EUR", BE: "EUR", CY: "EUR", DE: "EUR", EE: "EUR", ES: "EUR", FI: "EUR",
+  FR: "EUR", GR: "EUR", HR: "EUR", IE: "EUR", IT: "EUR", LT: "EUR", LU: "EUR",
+  LV: "EUR", MT: "EUR", NL: "EUR", PT: "EUR", SI: "EUR", SK: "EUR",
 };
 
 export function isCurrency(value: unknown): value is Currency {
@@ -34,16 +78,17 @@ export function currencyForCountry(
 }
 
 export function formatMoney(minor: number, currency: string): string {
-  const amount = minor / 100;
+  const fractionDigits = currencyFractionDigits(currency);
+  const amount = fromMinorAmount(minor, currency);
   try {
     return new Intl.NumberFormat("en-US", {
       style: "currency",
       currency,
-      minimumFractionDigits: currency === "NGN" || currency === "KES" ? 0 : 2,
-      maximumFractionDigits: 2,
+      minimumFractionDigits: fractionDigits,
+      maximumFractionDigits: fractionDigits,
     }).format(amount);
   } catch {
-    return `${currency} ${amount.toFixed(2)}`;
+    return `${currency} ${amount.toFixed(fractionDigits)}`;
   }
 }
 
@@ -57,14 +102,17 @@ export function resolvePriceMinor(args: {
   baseCurrency: string;
   overrides: Partial<Record<string, number>>;
   fxRates: Partial<Record<string, number>>;
-}): { priceMinor: number; isOverride: boolean } {
+}): { priceMinor: number; isOverride: boolean } | null {
   const override = args.overrides[args.currency];
   if (typeof override === "number" && override > 0) {
     return { priceMinor: Math.round(override), isOverride: true };
   }
-  const fromRate = args.fxRates[args.baseCurrency] ?? 1;
-  const toRate = args.fxRates[args.currency] ?? 1;
-  const converted = (args.basePriceMinor / fromRate) * toRate;
-  const rounded = args.currency === "USD" ? Math.round(converted) : Math.round(converted / 100) * 100;
-  return { priceMinor: Math.max(rounded, 0), isOverride: false };
+  if (args.currency === args.baseCurrency) {
+    return args.basePriceMinor > 0 ? { priceMinor: Math.round(args.basePriceMinor), isOverride: false } : null;
+  }
+  const fromRate = args.fxRates[args.baseCurrency];
+  const toRate = args.fxRates[args.currency];
+  if (typeof fromRate !== "number" || fromRate <= 0 || typeof toRate !== "number" || toRate <= 0) return null;
+  const baseAmount = fromMinorAmount(args.basePriceMinor, args.baseCurrency);
+  return { priceMinor: Math.max(toMinorAmount((baseAmount / fromRate) * toRate, args.currency), 0), isOverride: false };
 }

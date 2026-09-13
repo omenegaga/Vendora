@@ -76,7 +76,7 @@ function SettingsPage() {
         ]),
       ),
       fx_rates: Object.fromEntries(
-        SUPPORTED_CURRENCIES.map((currency) => [currency, String(rates[currency] ?? 1)]),
+        SUPPORTED_CURRENCIES.map((currency) => [currency, rates[currency] ? String(rates[currency]) : ""]),
       ),
     });
   }, [settings.data]);
@@ -101,10 +101,10 @@ function SettingsPage() {
             ]),
           ),
           fx_rates: Object.fromEntries(
-            Object.entries(draft.fx_rates).map(([currency, value]) => [
-              currency,
-              Number(value) || 1,
-            ]),
+            Object.entries(draft.fx_rates).flatMap(([currency, value]) => {
+              const rate = Number(value);
+              return Number.isFinite(rate) && rate > 0 ? [[currency, rate]] : [];
+            }),
           ),
         })
         .eq("id", true);
@@ -137,6 +137,11 @@ function SettingsPage() {
   });
 
   if (!draft) return <p className="text-sm text-muted-foreground">Loading settings…</p>;
+
+  const missingFxRates = SUPPORTED_CURRENCIES.filter((currency) => {
+    const value = Number(draft.fx_rates[currency]);
+    return !Number.isFinite(value) || value <= 0;
+  });
 
   return (
     <div className="max-w-3xl space-y-8">
@@ -198,10 +203,7 @@ function SettingsPage() {
                 </option>
               ))}
             </select>
-            <p className="text-xs text-muted-foreground">
-              Used when we can't tell a buyer's country. Buyers in Nigeria, Ghana and Kenya still
-              see their own currency automatically, and can switch manually.
-            </p>
+            <p className="text-xs text-muted-foreground">Used when we can't tell a buyer's country.</p>
           </div>
         </div>
       </section>
@@ -270,8 +272,13 @@ function SettingsPage() {
       <section className="space-y-4 rounded-xl border border-border bg-card p-6">
         <h2 className="font-display text-lg font-semibold">Automatic conversion rates</h2>
         <p className="text-sm text-muted-foreground">
-          Used only when a product has no exact price for a currency. Value per 1 USD.
+          Used only when a product has no exact price for a currency. Value per 1 USD. A currency is not offered at checkout until it has either an exact product price or a valid rate.
         </p>
+        {missingFxRates.length ? (
+          <p className="rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning">
+            Rates still needed: {missingFxRates.join(", ")}. Set a rate or add an exact product price before offering these currencies.
+          </p>
+        ) : null}
         <div className="grid gap-4 sm:grid-cols-4">
           {SUPPORTED_CURRENCIES.map((currency) => (
             <div key={currency} className="space-y-2">
@@ -282,6 +289,7 @@ function SettingsPage() {
                 min="0"
                 step="0.0001"
                 value={draft.fx_rates[currency]}
+                placeholder="Required for automatic pricing"
                 onChange={(e) =>
                   setDraft({ ...draft, fx_rates: { ...draft.fx_rates, [currency]: e.target.value } })
                 }
