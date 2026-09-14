@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { Check, X } from "lucide-react";
+import { AlertCircle, Check, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
@@ -142,6 +142,8 @@ function SettingsPage() {
     const value = Number(draft.fx_rates[currency]);
     return !Number.isFinite(value) || value <= 0;
   });
+  const integrationStatusError =
+    status.error instanceof Error ? status.error.message : "Unable to check integration status.";
 
   return (
     <div className="max-w-3xl space-y-8">
@@ -242,28 +244,40 @@ function SettingsPage() {
           ))}
         </div>
 
-        <div className="grid gap-4 pt-2 sm:grid-cols-2">
-          {(
-            [
-              ["Paystack keys", status.data?.paystack],
-              ["Flutterwave keys", status.data?.flutterwave],
-              ["Flutterwave webhook hash", status.data?.flutterwaveWebhookHash],
-              ["Meta server events token", status.data?.metaCapiToken],
-              ["Email sending", status.data?.emailSending],
-            ] as const
-          ).map(([label, ok]) => (
-            <p key={label} className="flex items-center gap-2 text-sm">
-              {ok ? (
-                <Check className="size-4 text-accent" />
-              ) : (
-                <X className="size-4 text-muted-foreground" />
-              )}
-              <span className={ok ? "" : "text-muted-foreground"}>
-                {label}: {ok ? "connected" : "not set up"}
-              </span>
-            </p>
-          ))}
-        </div>
+        {status.isError ? (
+          <p
+            role="alert"
+            className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+          >
+            <AlertCircle className="mt-0.5 size-4 shrink-0" />
+            <span>Integration status could not be checked: {integrationStatusError}</span>
+          </p>
+        ) : status.isPending ? (
+          <p className="text-sm text-muted-foreground">Checking integration status…</p>
+        ) : (
+          <div className="grid gap-4 pt-2 sm:grid-cols-2">
+            {(
+              [
+                ["Paystack keys", status.data?.paystack],
+                ["Flutterwave keys", status.data?.flutterwave],
+                ["Flutterwave webhook hash", status.data?.flutterwaveWebhookHash],
+                ["Meta server events token", status.data?.metaCapiToken],
+                ["Email sending", status.data?.emailSending],
+              ] as const
+            ).map(([label, ok]) => (
+              <p key={label} className="flex items-center gap-2 text-sm">
+                {ok ? (
+                  <Check className="size-4 text-accent" />
+                ) : (
+                  <X className="size-4 text-muted-foreground" />
+                )}
+                <span className={ok ? "" : "text-muted-foreground"}>
+                  {label}: {ok ? "connected" : "not set up"}
+                </span>
+              </p>
+            ))}
+          </div>
+        )}
         <p className="text-xs text-muted-foreground">
           While no provider is connected, checkout runs in test mode so you can walk the full flow.
         </p>
@@ -323,7 +337,13 @@ function SettingsPage() {
           <div className="flex flex-wrap items-center justify-between gap-2">
             <Label htmlFor="capi-token">Conversions API access token</Label>
             <span className={`text-xs font-medium ${status.data?.metaCapiToken ? "text-accent" : "text-muted-foreground"}`}>
-              {status.data?.metaCapiToken ? "Configured" : "Not configured"}
+              {status.isError
+                ? "Status unavailable"
+                : status.isPending
+                  ? "Checking…"
+                  : status.data?.metaCapiToken
+                    ? "Configured"
+                    : "Not configured"}
             </span>
           </div>
           <div className="flex flex-col gap-3 sm:flex-row">
